@@ -1,3 +1,41 @@
+# Dependencies
+node_modules
+package-lock.json
+
+# Git
 .git
-.gitignore
 .github
+.gitignore
+
+# Large directories
+claw-repos
+data
+business-finance-tracker
+
+# Build artifacts
+dist
+build
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea
+.vscode
+*.swp
+
+# Local config
+.env
+.env.local
+*.local
+
+# Testing
+coverage
+.nyc_output
+
+# Temporary files
+tmp
+temp
+*.tmp
