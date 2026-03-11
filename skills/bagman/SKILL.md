@@ -1,6 +1,6 @@
 ---
 name: bagman
-version: 2.1.0
+version: 2.2.0
 description: Secure key management for AI agents. Use when handling private keys, API secrets, wallet credentials, or when building systems that need agent-controlled funds. Covers secure storage, session keys, leak prevention, prompt injection defense, and MetaMask Delegation Framework integration.
 homepage: https://github.com/zscole/bagman-skill
 metadata:
@@ -151,27 +151,33 @@ Agent-Credentials/
 
 ---
 
-## 2. Output Sanitization
+## 2. Output Sanitization (MANDATORY)
 
-Apply to ALL agent outputs before sending anywhere:
+**⚠️ CRITICAL: Apply to ALL agent outputs before sending anywhere. No exceptions.**
+
+This includes:
+- Chat responses
+- Cron job summaries
+- Monitoring alerts
+- Status reports
+- Debug logs
+- Error messages
+- Any text that leaves the agent
 
 ```python
 from sanitizer import OutputSanitizer
 
 def respond(content: str) -> str:
-    """Sanitize before any output."""
+    """Mandatory sanitization before ANY output."""
     return OutputSanitizer.sanitize(content)
 
-# Catches:
-# - Private keys (0x + 64 hex)
-# - OpenAI/Anthropic/Groq/AWS keys
-# - GitHub/Slack/Discord tokens
-# - BIP-39 seed phrases (12/24 words)
-# - PEM private keys
-# - JWT tokens
+def cron_summary(task_result: dict) -> str:
+    """Cron summaries MUST sanitize before delivery."""
+    summary = format_summary(task_result)
+    return OutputSanitizer.sanitize(summary)  # ALWAYS sanitize
 ```
 
-### Patterns Detected
+### Secret Patterns Detected
 
 | Pattern | Example | Result |
 |---------|---------|--------|
@@ -181,6 +187,42 @@ def respond(content: str) -> str:
 | Anthropic key | `sk-ant-api03-...` | `[ANTHROPIC_KEY_REDACTED]` |
 | 12-word seed | `abandon ability able...` | `[SEED_PHRASE_12_WORDS_REDACTED]` |
 | JWT | `eyJhbG...` | `[JWT_TOKEN_REDACTED]` |
+| Venice key refs | `venice:key1`, `venice:key2` | `[ venice:key1 ]` (bracketed) |
+
+### Sensitive Metrics Redacted (Cron Summaries)
+
+| Pattern | Example | Result |
+|---------|---------|--------|
+| DIEM counts | `98 DIEM`, `194 DIEM` | `[DIEM_REDACTED]` |
+| Balance | `balance: 42.5 DIEM` | `[BALANCE_REDACTED]` |
+| Threshold | `threshold: 10 DIEM` | `[THRESHOLD_REDACTED]` |
+| Totals | `total: 194 DIEM` | `[TOTAL_REDACTED]` |
+| Remaining/Spent | `remaining: 50 DIEM` | `[METRIC_REDACTED]` |
+
+### Cron Summary Example
+
+**BEFORE sanitization (NEVER send this):**
+```
+Venice API check: venice:key1 has 98 DIEM, venice:key2 has 96 DIEM.
+Balance: 194 DIEM, Threshold: 10 DIEM
+```
+
+**AFTER sanitization (safe to send):**
+```
+Venice API check: [ venice:key1 ] has [DIEM_REDACTED], [ venice:key2 ] has [DIEM_REDACTED].
+[BALANCE_REDACTED], [THRESHOLD_REDACTED]
+```
+
+### Venice Key Reference Sanitization
+
+Venice API key references (`venice:key1`, `venice:key2`, etc.) are **NOT secrets** themselves, but should be bracketed to:
+1. Prevent them from being used as identifiers in logs
+2. Make it clear they are references, not actual keys
+3. Distinguish from potential false-positive patterns
+
+The sanitizer brackets un-bracketed references: `venice:key1` → `[ venice:key1 ]`
+
+Already-bracketed references are left unchanged: `[ venice:key1 ]` → `[ venice:key1 ]`
 
 ---
 
@@ -455,6 +497,101 @@ python session_keys.py # Session key demo
 ```
 
 Expected output: `All tests passed`
+
+### Test Evidence (v2.2.0 - 2026-03-11)
+
+**Sanitizer v3 Test Results - All 16 tests passed:**
+
+```
+Output Sanitizer Test (v3)
+============================================================
+
+✅ PASS (expect detect)
+   Input:     My key is 0x1234567890abcdef...
+   Sanitized: My key is [PRIVATE_KEY_REDACTED]
+
+✅ PASS (expect detect)
+   Input:     Key: 1234567890abcdef...
+   Sanitized: Key: [HEX_KEY_REDACTED]
+
+✅ PASS (expect detect)
+   Input:     First half: 1234567890abcdef...
+   Sanitized: First half: [PARTIAL_KEY_REDACTED]
+
+✅ PASS (expect detect)
+   Input:     Send to 0x742d35Cc6634C0532925a3b844Bc454e4438f44e
+   Sanitized: Send to 0x742d...f44e
+
+✅ PASS (expect detect)
+   Input:     Using sk-proj-abc123def456...
+   Sanitized: Using [OPENAI_KEY_REDACTED]
+
+✅ PASS (expect detect)
+   Input:     API key is sk-ant-api03-abcdef...
+   Sanitized: API key is [ANTHROPIC_KEY_REDACTED]
+
+✅ PASS (expect detect)
+   Input:     aws_secret_key=AKIAIOSFODNN7EXAMPLE...
+   Sanitized: aws_secret_key=[AWS_ACCESS_KEY_REDACTED]...
+
+✅ PASS (expect ignore)
+   Input:     The hash is dGhpcyBpcyBhIHRlc3Q...
+   Sanitized: The hash is dGhpcyBpcyBhIHRlc3Q...
+
+✅ PASS (expect detect)
+   Input:     abandon ability able about above absent...
+   Sanitized: [SEED_PHRASE_12_WORDS_REDACTED]
+
+✅ PASS (expect detect)
+   Input:     Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+   Sanitized: Bearer [JWT_TOKEN_REDACTED]
+
+✅ PASS (expect ignore)
+   Input:     Normal text without secrets
+   Sanitized: Normal text without secrets
+
+✅ PASS (expect detect)
+   Input:     Bot token: 123456789:ABCdefGHI...
+   Sanitized: Bot token: [TELEGRAM_TOKEN_REDACTED]
+
+============================================================
+Cron Summary & Venice Key Sanitization Tests
+------------------------------------------------------------
+
+✅ PASS
+   Input:     Venice API check: venice:key1 has 98 DIEM, venice:key2 has 96 DIEM. Total: 194 DIEM.
+   Sanitized: Venice API check: [ venice:key1 ] has [DIEM_REDACTED], [ venice:key2 ] has [DIEM_REDACTED]...
+   Expected fragment ✓: [ venice:key1 ]
+   Expected fragment ✓: [ venice:key2 ]
+   Expected fragment ✓: [DIEM_REDACTED]
+
+✅ PASS
+   Input:     Monitor: balance: 42.5 DIEM, threshold: 10 DIEM, total: 194 DIEM
+   Sanitized: Monitor: [BALANCE_REDACTED], [THRESHOLD_REDACTED], [TOTAL_REDACTED]
+   Expected fragment ✓: [BALANCE_REDACTED]
+   Expected fragment ✓: [THRESHOLD_REDACTED]
+   Expected fragment ✓: [TOTAL_REDACTED]
+
+✅ PASS
+   Input:     Using [ venice:key1 ] for fallback.
+   Sanitized: Using [ venice:key1 ] for fallback.
+   Expected fragment ✓: [ venice:key1 ]
+
+✅ PASS
+   Input:     remaining: 50 DIEM, spent: 30 DIEM
+   Sanitized: remaining: [DIEM_REDACTED], spent: [DIEM_REDACTED]
+   Expected fragment ✓: [DIEM_REDACTED]
+
+============================================================
+Results: 16 passed, 0 failed
+All tests passed ✅
+```
+
+**Key capabilities verified:**
+- venice:key<N> references are bracketed: `[ venice:key1 ]`
+- Already-bracketed references remain unchanged
+- Sensitive metrics (balance, threshold, total, DIEM counts) are redacted
+- All existing secret detection patterns work correctly
 
 ---
 

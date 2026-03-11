@@ -40,7 +40,7 @@ const CONFIG = {
   providerName: 'mor-gateway',
   gatewayBaseUrl: 'https://api.mor.org/api/v1',
   timeout: 10000, // 10 seconds
-  everclawVersion: 'v2026.2.26', // Will be detected from SKILL.md if possible
+  everclawVersion: 'v2026.3.13', // Will be detected from SKILL.md if possible
 };
 
 // GLM-5 model config for Morpheus Gateway

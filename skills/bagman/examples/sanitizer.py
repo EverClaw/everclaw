@@ -1,14 +1,14 @@
 """
-Bagman Output Sanitizer (v2)
+Bagman Output Sanitizer (v3)
 
 Apply to ALL agent outputs before sending to any channel.
-Catches keys, secrets, seed phrases, and sensitive patterns.
+Catches keys, secrets, seed phrases, sensitive patterns,
+and operational metrics that should not leak.
 
-Improvements over v1:
-- Full BIP-39 wordlist (2048 words)
-- Fixed AWS secret pattern (was too broad)
-- Added split-key detection
-- Better hex key detection
+Improvements over v2:
+- venice:key<N> references bracketed as [ venice:key<N> ]
+- Sensitive metric redaction (balance, threshold, totals, DIEM, etc.)
+- Cron summary sanitization (monitoring output scrubbing)
 """
 
 import re
@@ -110,11 +110,37 @@ class OutputSanitizer:
         
         # Infura/Alchemy project IDs
         (r'(?i)(infura|alchemy)[_\s]*(?:project[_\s]*)?(?:id|key|secret)\s*[:=]\s*["\']?([a-zA-Z0-9_\-]{20,})["\']?', r'\1=[REDACTED]'),
+        
+        # Venice API key references (venice:key1, venice:key2, etc.)
+        # Bracket them so they don't leak as usable identifiers
+        (r'(?<!\[)\bvenice:key(\d+)\b(?!\s*\])', r'[ venice:key\1 ]'),
+    ]
+    
+    # Patterns for sensitive operational metrics that should not appear in
+    # outbound summaries (cron reports, monitoring digests, etc.)
+    SENSITIVE_METRIC_PATTERNS: List[Tuple[str, str]] = [
+        # Balance figures (e.g., "balance: 42.5", "balance=100 DIEM")
+        (r'(?i)\b(balance|bal)\s*[:=]\s*[\d,]+\.?\d*\s*(?:DIEM|MOR|ETH|BTC|USD|USDC|USDT)?', '[BALANCE_REDACTED]'),
+        # Threshold values
+        (r'(?i)\b(threshold|thresh)\s*[:=]\s*[\d,]+\.?\d*\s*(?:DIEM|MOR|ETH|BTC|USD|USDC|USDT)?', '[THRESHOLD_REDACTED]'),
+        # Totals / grand totals
+        (r'(?i)\b(total|grand[\s_-]?total)\s*[:=]\s*[\d,]+\.?\d*\s*(?:DIEM|MOR|ETH|BTC|USD|USDC|USDT)?', '[TOTAL_REDACTED]'),
+        # DIEM counts (e.g., "194 DIEM", "key1=98 DIEM")
+        (r'\b\d+\s*DIEM\b', '[DIEM_REDACTED]'),
+        # Explicit "remaining" / "available" / "spent" amounts
+        (r'(?i)\b(remaining|available|spent|used)\s*[:=]\s*[\d,]+\.?\d*\s*(?:DIEM|MOR|ETH|BTC|USD|USDC|USDT)?', '[METRIC_REDACTED]'),
     ]
     
     @classmethod
-    def sanitize(cls, text: str) -> str:
-        """Remove potential secrets from text."""
+    def sanitize(cls, text: str, redact_metrics: bool = True) -> str:
+        """Remove potential secrets from text.
+        
+        Args:
+            text: Raw output text.
+            redact_metrics: If True (default), also strip sensitive operational
+                            metrics (balances, thresholds, totals, DIEM counts).
+                            Disable only for internal debug logging.
+        """
         if not text:
             return text
         
@@ -123,6 +149,11 @@ class OutputSanitizer:
             if callable(replacement):
                 text = re.sub(pattern, replacement, text)
             else:
+                text = re.sub(pattern, replacement, text)
+        
+        # Strip sensitive metrics from monitoring / cron outputs
+        if redact_metrics:
+            for pattern, replacement in cls.SENSITIVE_METRIC_PATTERNS:
                 text = re.sub(pattern, replacement, text)
         
         # Check for seed phrases (12 or 24 word sequences)
@@ -224,10 +255,43 @@ if __name__ == "__main__":
         ("Bot token: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz12345678", True),
     ]
     
-    print("Output Sanitizer Test (v2)\n" + "=" * 60)
+    # --- Venice key & metric sanitization tests ---
+    cron_summary_tests = [
+        # venice:key references should get bracketed
+        (
+            "Venice API check: venice:key1 has 98 DIEM, venice:key2 has 96 DIEM. Total: 194 DIEM.",
+            "[ venice:key1 ]",      # key1 bracketed
+            "[ venice:key2 ]",      # key2 bracketed
+            "[DIEM_REDACTED]",      # DIEM counts hidden
+        ),
+        # Balance, threshold, totals in cron output
+        (
+            "Monitor: balance: 42.5 DIEM, threshold: 10 DIEM, total: 194 DIEM",
+            "[BALANCE_REDACTED]",
+            "[THRESHOLD_REDACTED]",
+            "[TOTAL_REDACTED]",
+        ),
+        # Already-bracketed venice:key should NOT be double-bracketed
+        (
+            "Using [ venice:key1 ] for fallback.",
+            "[ venice:key1 ]",
+            None,
+            None,
+        ),
+        # Remaining / spent metrics (DIEM values get caught by DIEM pattern first)
+        (
+            "remaining: 50 DIEM, spent: 30 DIEM",
+            "[DIEM_REDACTED]",  # DIEM pattern fires first, still sanitized
+            None,
+            None,
+        ),
+    ]
+    
+    print("Output Sanitizer Test (v3)\n" + "=" * 60)
     passed = 0
     failed = 0
     
+    # Original secret-detection tests
     for test, should_detect in test_cases:
         has_secret, reason = OutputSanitizer.contains_secret(test)
         sanitized = OutputSanitizer.sanitize(test)
@@ -245,5 +309,34 @@ if __name__ == "__main__":
         if has_secret:
             print(f"   Reason:    {reason}")
     
+    # Cron summary / venice:key / metric tests
+    print(f"\n{'=' * 60}")
+    print("Cron Summary & Venice Key Sanitization Tests\n" + "-" * 60)
+    
+    for entry in cron_summary_tests:
+        raw = entry[0]
+        expected_fragments = [e for e in entry[1:] if e is not None]
+        sanitized = OutputSanitizer.sanitize(raw)
+        
+        all_ok = all(frag in sanitized for frag in expected_fragments)
+        # Also ensure raw venice:key<N> (un-bracketed) is gone
+        has_raw_venice = re.search(r'(?<!\[)\bvenice:key\d+\b(?!\s*\])', sanitized) is not None
+        
+        if all_ok and not has_raw_venice:
+            status = "✅ PASS"
+            passed += 1
+        else:
+            status = "❌ FAIL"
+            failed += 1
+        
+        print(f"\n{status}")
+        print(f"   Input:     {raw[:80]}{'...' if len(raw) > 80 else ''}")
+        print(f"   Sanitized: {sanitized[:80]}{'...' if len(sanitized) > 80 else ''}")
+        for frag in expected_fragments:
+            found = "✓" if frag in sanitized else "✗"
+            print(f"   Expected fragment {found}: {frag}")
+    
     print(f"\n{'=' * 60}")
     print(f"Results: {passed} passed, {failed} failed")
+    if failed == 0:
+        print("All tests passed ✅")

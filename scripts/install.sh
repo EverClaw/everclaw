@@ -10,6 +10,19 @@ REPO="MorpheusAIs/Morpheus-Lumerin-Node"
 echo "Everclaw -- Installer"
 echo "======================================"
 
+# Check required tools
+for cmd in curl; do
+  if ! command -v "$cmd" &>/dev/null; then
+    echo "ERROR: $cmd is required but not found. Install it first."
+    exit 1
+  fi
+done
+
+# Check for unzip (needed for legacy zip assets)
+if ! command -v unzip &>/dev/null; then
+  echo "WARNING: unzip not found. Will fail if release uses zip format."
+fi
+
 # Detect OS and architecture
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
@@ -34,7 +47,13 @@ echo "Finding latest release..."
 LATEST_TAG=$(curl -sL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
 
 if [[ -z "$LATEST_TAG" ]]; then
-  echo "ERROR:Could not determine latest release. Check network connectivity."
+  echo "ERROR: Could not determine latest release."
+  echo "   Possible causes:"
+  echo "   - No network connectivity"
+  echo "   - GitHub API rate limit (60/hr unauthenticated)"
+  echo "   - Repository not found: ${REPO}"
+  echo ""
+  echo "   Try: curl -sL https://api.github.com/rate_limit | grep -A2 rate"
   exit 1
 fi
 

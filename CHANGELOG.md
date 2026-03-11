@@ -2,6 +2,40 @@
 
 All notable changes to EverClaw are documented here.
 
+## [2026.3.13] - 2026-03-11
+
+### Fixed
+- **Version alignment** — SKILL.md, package.json, and git tag now all match
+- **Removed duplicate security/ directory** — skills/ is canonical; security/ was a stale copy with diverging content
+- **Bootstrap version updated** — was hardcoded to v2026.2.26
+- **CHANGELOG backfilled** — added missing v2026.3.11 and v2026.3.12 entries
+- **install.sh error handling** — added curl/unzip pre-checks, improved GitHub API rate limit diagnostics
+
+---
+
+## [2026.3.12] - 2026-03-09
+
+### Added
+- **morpheus-session-mgr.mjs** — CLI for Morpheus P2P session management (7 commands: status, balance, models, sessions, estimate, fund, logs)
+- **safe-transfer.mjs** — EIP-712 Safe→Router MOR transfers via 1Password key injection
+- **inference-balance-tracker.mjs** — Daily MOR+ETH balance tracker with CoinGecko prices
+
+### Changed
+- **morpheus-proxy.mjs** — Added MOR balance monitoring, P2P→Gateway fallback, session tracking, health endpoint with balance/session/fallback fields
+- **SOP-002 v1.1** — Documented Morpheus P2P staking model (MOR is staked, not spent)
+- **All personal wallet addresses removed** — scripts require env vars (MORPHEUS_WALLET_ADDRESS, MORPHEUS_SAFE_ADDRESS)
+- **1Password references configurable** — OP_KEYCHAIN_ACCOUNT, OP_VAULT, OP_ITEM via env vars
+
+---
+
+## [2026.3.11] - 2026-03-09
+
+### Added
+- **Wallet safety suite** — receipt verification via `waitAndVerify()`, slippage protection via Uniswap QuoterV2, configurable gas limits (EVERCLAW_MAX_GAS), confirmation tracking (EVERCLAW_CONFIRMATIONS), slippage tolerance (EVERCLAW_SLIPPAGE_BPS)
+- **36 automated tests** — split across A (offline), B (balance+approve), C (swap+slippage)
+
+---
+
 ## [2026.3.10] - 2026-03-08
 
 ### Changed

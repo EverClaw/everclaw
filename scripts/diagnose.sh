@@ -2,7 +2,7 @@
 # diagnose.sh — Everclaw Health Diagnostic
 #
 # Step 1: Config checks (no network, no processes, pure file parsing)
-# Step 2: Infrastructure checks (TODO — network, processes, inference)
+# Step 2: Infrastructure checks (network, processes, inference)
 #
 # Usage:
 #   bash skills/everclaw/scripts/diagnose.sh            # All checks
