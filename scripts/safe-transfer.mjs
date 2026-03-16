@@ -173,15 +173,28 @@ async function main() {
     message: safeTx,
   });
   
-  // For a 1-of-N Safe, we can execute with just our signature
-  // The signature needs to be sorted by owner address and encoded
-  // Since we're a single signer (threshold=1), just our signature is enough
-  const sortedSignature = signature;
-  
-  // Actually, for 1-of-2, we just need our signature properly encoded
-  // Safe signature format: r (32) + s (32) + v (1) for each signer, sorted by address
-  const encodedSignature = signature; // Our signature is enough for 1-of-2
-  
+  // Signature from viem is already in correct r+s+v format for Safe — no packing needed
+
+  // === STAGE 1: SIMULATE + CONFIRM BEFORE execution ===
+  console.log("🔍 Simulating Safe transaction on Base...");
+  await publicClient.simulateContract({
+    address: SAFE_ADDRESS,
+    abi: SAFE_ABI,
+    functionName: "execTransaction",
+    args: [safeTx.to, safeTx.value, safeTx.data, safeTx.operation, safeTx.safeTxGas, safeTx.baseGas, safeTx.gasPrice, safeTx.gasToken, safeTx.refundReceiver, signature],
+    account: walletClient.account,
+  });
+  console.log("   ✅ Simulation passed");
+
+  const answer = await new Promise(resolve => {
+    process.stdout.write("⚠️  CONFIRM TRANSACTION? (type yes to proceed) ");
+    process.stdin.once("data", d => resolve(d.toString().trim().toLowerCase()));
+  });
+  if (answer !== "yes") {
+    console.log("Cancelled by user.");
+    process.exit(0);
+  }
+
   console.log("📤 Executing Safe transaction...");
   
   try {
@@ -199,9 +212,9 @@ async function main() {
         safeTx.gasPrice,
         safeTx.gasToken,
         safeTx.refundReceiver,
-        encodedSignature,
+        signature,
       ],
-      gas: 200000n,
+      gas: undefined, // let viem estimate dynamically
     });
     
     console.log(`\n✅ Transaction submitted: ${hash}`);
