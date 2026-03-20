@@ -388,7 +388,7 @@ install_dep() {
       reload_brew_path
       
       # Verify and persist
-      if verify_installed "Homebrew" "$BREW_CMD"; then
+      if verify_installed "Homebrew" "brew"; then
         persist_brew_path
         return 0
       else
@@ -412,8 +412,8 @@ install_dep() {
         if [[ -n "$BREW_CMD" ]]; then
           "$BREW_CMD" install git 2>&1 | tail -3
         else
-          log_err "Homebrew not available — cannot install git"
-          return 1
+          log_warn "Git install skipped (no Homebrew on this Mac)"
+          log "  Install Xcode Command Line Tools: xcode-select --install"
         fi
       else
         case "$PACKAGE_MANAGER" in
