@@ -86,6 +86,8 @@ jobs:
 
       - name: Build Docker image
         run: docker build -t everclaw-test .
+        env:
+          DOCKER_BUILDKIT: "1"
 
       - name: Basic container smoke test
         run: docker run --rm everclaw-test node --check scripts/setup.mjs
