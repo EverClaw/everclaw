@@ -2,6 +2,11 @@
 
 All notable changes to EverClaw are documented here.
 
+## [2026.3.27.1707] - 2026-03-27
+
+### Fixed
+- **Docker VOLUME overlay bug on first run** — Default config template was baked into `/home/node/.openclaw/`, which gets hidden by Barney's auto-mounted empty persistent volume, causing `cp: cannot stat` and container exit. Moved template to `/opt/everclaw/defaults/` (outside any VOLUME) so it survives empty mount overlays.
+
 ## [2026.3.27.0434] - 2026-03-27
 
 ### Fixed
