@@ -2,6 +2,21 @@
 
 All notable changes to EverClaw are documented here.
 
+## [Unreleased] - 2026-04-01
+
+### Security
+- **[Critical] MITM protection for bootstrap API (Issue #8)** — `bootstrap-client.mjs` now enforces HTTPS for all remote API calls. Plain `http://` is rejected with a clear error unless targeting localhost/127.0.0.1 (dev only). Prevents network observers from reading wallet addresses, PoW challenges, and nonces in transit.
+- **TLS bypass detection** — Warns loudly if `NODE_TLS_REJECT_UNAUTHORIZED=0` is set, which disables certificate verification and re-enables MITM attacks.
+- **Response validation hardening** — Challenge and claim responses are now structurally validated (type + length checks). Malformed responses trigger "possible MITM or API change" errors instead of silent failures.
+
+### Added
+- **Fetch timeouts** — Both API calls now use `AbortSignal.timeout(30000)` to fail fast on dead/unresponsive networks instead of hanging indefinitely.
+- **Issue #8 regression test suite** — 21 tests covering URL validation, HTTPS enforcement, localhost exceptions, and response validation (`test-issue8-regression.mjs`).
+
+### Fixed
+- **Help text** — Corrected default URL from `https://api.everclaw.xyz/bootstrap` to `https://api.everclaw.xyz`.
+- **Existing test suite** — Added missing `node:test` import to `bootstrap-client.test.mjs` (pre-existing bug, tests now run correctly).
+
 ## [2026.4.1] - 2026-04-01
 
 ### Security — Wallet Encryption Overhaul (Issue #7)
