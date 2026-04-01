@@ -2,6 +2,23 @@
 
 All notable changes to EverClaw are documented here.
 
+## [2026.4.1.1518] - 2026-04-01
+
+### Security
+- **[Critical] CI mode no longer bypasses token approval confirmations (Issue #9)** — When `EVERCLAW_YES=1` or `CI=true`, unlimited MOR approvals (`maxUint256`) are now **blocked** unless the explicit `--unlimited` flag is passed. Private key export is **blocked** unless `EVERCLAW_ALLOW_EXPORT=1` is set. Bounded approvals and swaps still auto-confirm (acceptable risk — bounded amounts, simulated first).
+
+### Added
+- **`--unlimited` flag** — Required to explicitly approve unlimited MOR spending in CI/automated environments. Makes the risk visible rather than silent.
+- **`EVERCLAW_ALLOW_EXPORT` env var** — Must be set to `"1"` to allow `export-key` in CI mode. Separate from `EVERCLAW_YES` for defense-in-depth.
+- **CI audit trail logging** — All CI auto-confirmed actions now log what was approved (swap amount, approval type) for audit visibility.
+- **Flag filtering in argv** — `--unlimited` and `--dry-run` are now filtered from positional args, preventing `parseEther("--unlimited")` crash.
+- **13 new tests in `tests/lib-ci-safety.mjs`** — Covers CI gate blocking, flag pass-through, bounded approval auto-confirm, export gate, help text validation, flag/arg separation.
+- **Help text updates** — New Flags section, CI Safety section, `EVERCLAW_ALLOW_EXPORT`/`EVERCLAW_YES`/`CI` env var documentation, new examples.
+
+### Changed
+- **CI safety gates run before wallet retrieval** — Fail-fast: dangerous operations are blocked before any keychain access, improving both security and testability.
+- **5-second countdown skipped in CI** — `export-key` no longer waits 5 seconds in non-interactive mode (when explicitly allowed via env var).
+
 ## [2026.4.1.1447] - 2026-04-01
 
 ### Security

@@ -39,6 +39,8 @@ const OS = platform();
 const SLIPPAGE_BPS = parseInt(process.env.EVERCLAW_SLIPPAGE_BPS || "100", 10); // 100 = 1%
 const TX_CONFIRMATIONS = parseInt(process.env.EVERCLAW_CONFIRMATIONS || "1", 10);
 const CI_NON_INTERACTIVE = process.env.EVERCLAW_YES === "1" || process.env.CI === "true";
+const CI_ALLOW_UNLIMITED = process.argv.includes("--unlimited");
+const CI_ALLOW_EXPORT = process.env.EVERCLAW_ALLOW_EXPORT === "1";
 const MAX_GAS_LIMIT = BigInt(process.env.EVERCLAW_MAX_GAS || "500000");
 
 // --- Contract Addresses (Base Mainnet) ---
@@ -515,10 +517,16 @@ async function cmdSwap(tokenIn, amountStr) {
   console.log(`     Expected out: ${formatEther(quotedOutput)} MOR`);
   console.log(`     Min out (after ${SLIPPAGE_BPS / 100}% slippage): ${formatEther(amountOutMinimum)} MOR`);
 
-  const swapAnswer = CI_NON_INTERACTIVE ? "yes" : await new Promise(r => {
-    process.stdout.write("\n⚠️  CONFIRM SWAP? (type yes to proceed) ");
-    process.stdin.once("data", d => r(d.toString().trim().toLowerCase()));
-  });
+  let swapAnswer;
+  if (CI_NON_INTERACTIVE) {
+    console.log(`\n⚠️  CI MODE: Auto-approved swap of ${amountStr} ${tokenIn.toUpperCase()} → MOR`);
+    swapAnswer = "yes";
+  } else {
+    swapAnswer = await new Promise(r => {
+      process.stdout.write("\n⚠️  CONFIRM SWAP? (type yes to proceed) ");
+      process.stdin.once("data", d => r(d.toString().trim().toLowerCase()));
+    });
+  }
   if (swapAnswer !== "yes") {
     console.log("Cancelled by user.");
     process.exit(0);
@@ -562,6 +570,18 @@ async function cmdSwap(tokenIn, amountStr) {
 }
 
 async function cmdApprove(amountStr) {
+  // CI safety gate: check BEFORE wallet retrieval for fail-fast
+  const isUnlimited = !amountStr;
+  if (CI_NON_INTERACTIVE && isUnlimited && !CI_ALLOW_UNLIMITED) {
+    console.error("\n❌ CI MODE: Unlimited MOR approval blocked.");
+    console.error("   CI/automated environments cannot silently approve unlimited token spending.");
+    console.error("   To explicitly allow this, pass the --unlimited flag:");
+    console.error("     node everclaw-wallet.mjs approve --unlimited");
+    console.error("   Or specify a bounded amount:");
+    console.error("     node everclaw-wallet.mjs approve 1000");
+    process.exit(1);
+  }
+
   const key = await keychainRetrieve();
   if (!key) {
     console.error("❌ No wallet found. Run 'setup' first.");
@@ -590,7 +610,6 @@ async function cmdApprove(amountStr) {
   });
   console.log("   ✅ Simulation passed");
 
-  const isUnlimited = !amountStr;
   if (isUnlimited) {
     console.log("\n⚠️  CRITICAL SECURITY WARNING:");
     console.log("   You are approving UNLIMITED MOR spending by the Diamond contract.");
@@ -598,13 +617,20 @@ async function cmdApprove(amountStr) {
     console.log("   all your MOR can be drained.");
   }
 
-  const approveAnswer = CI_NON_INTERACTIVE ? "yes" : await new Promise(r => {
-    const promptText = isUnlimited
-      ? "⚠️  CONFIRM UNLIMITED APPROVAL? (type yes to proceed) "
-      : `⚠️  CONFIRM APPROVE ${amountStr} MOR? (type yes to proceed) `;
-    process.stdout.write(promptText);
-    process.stdin.once("data", d => r(d.toString().trim().toLowerCase()));
-  });
+  let approveAnswer;
+  if (CI_NON_INTERACTIVE) {
+    const approvedType = isUnlimited ? "UNLIMITED (--unlimited flag)" : `${amountStr || "unknown"} MOR`;
+    console.log(`\n⚠️  CI MODE: Auto-approved MOR approval: ${approvedType}`);
+    approveAnswer = "yes";
+  } else {
+    approveAnswer = await new Promise(r => {
+      const promptText = isUnlimited
+        ? "⚠️  CONFIRM UNLIMITED APPROVAL? (type yes to proceed) "
+        : `⚠️  CONFIRM APPROVE ${amountStr} MOR? (type yes to proceed) `;
+      process.stdout.write(promptText);
+      process.stdin.once("data", d => r(d.toString().trim().toLowerCase()));
+    });
+  }
   if (approveAnswer !== "yes") {
     console.log("Cancelled by user.");
     process.exit(0);
@@ -634,6 +660,15 @@ async function cmdApprove(amountStr) {
 }
 
 async function cmdExportKey() {
+  // CI safety gate: check BEFORE wallet retrieval for fail-fast
+  if (CI_NON_INTERACTIVE && !CI_ALLOW_EXPORT) {
+    console.error("\n❌ CI MODE: Private key export blocked.");
+    console.error("   CI/automated environments cannot silently export private keys.");
+    console.error("   To explicitly allow this, set the environment variable:");
+    console.error("     EVERCLAW_ALLOW_EXPORT=1 node everclaw-wallet.mjs export-key");
+    process.exit(1);
+  }
+
   const key = await keychainRetrieve();
   if (!key) {
     console.error("❌ No wallet found. Run 'setup' first.");
@@ -646,18 +681,26 @@ async function cmdExportKey() {
   console.log("   This is EXTREMELY DANGEROUS. Anyone with this key controls your wallet.");
   console.log("   Type 'YES I UNDERSTAND' to continue (exact match required).");
 
-  const confirm = CI_NON_INTERACTIVE ? "YES I UNDERSTAND" : await new Promise(r => {
-    process.stdout.write("> ");
-    process.stdin.once("data", d => r(d.toString().trim()));
-  });
+  let confirm;
+  if (CI_NON_INTERACTIVE) {
+    console.log("\n⚠️  CI MODE: Auto-confirmed key export (EVERCLAW_ALLOW_EXPORT=1)");
+    confirm = "YES I UNDERSTAND";
+  } else {
+    confirm = await new Promise(r => {
+      process.stdout.write("> ");
+      process.stdin.once("data", d => r(d.toString().trim()));
+    });
+  }
 
   if (confirm !== "YES I UNDERSTAND") {
     console.log("Export cancelled.");
     process.exit(0);
   }
 
-  console.log("   Proceeding in 5 seconds... Press Ctrl+C to abort.");
-  await new Promise(r => setTimeout(r, 5000));
+  if (!CI_NON_INTERACTIVE) {
+    console.log("   Proceeding in 5 seconds... Press Ctrl+C to abort.");
+    await new Promise(r => setTimeout(r, 5000));
+  }
 
   console.log(`\n⚠️  PRIVATE KEY — DO NOT SHARE THIS WITH ANYONE\n`);
   console.log(`   Address: ${account.address}`);
@@ -710,6 +753,10 @@ Key Storage Backends (auto-detected):
   Linux    → libsecret/secret-tool if available, encrypted file fallback
   Other    → encrypted file (~/.everclaw/wallet.enc)
 
+Flags:
+  --unlimited                Explicitly allow unlimited MOR approval in CI mode
+  --dry-run                  Simulate transactions without sending
+
 Environment:
   EVERCLAW_RPC               Base RPC URL (default: public blastapi)
   EVERCLAW_KEY_STORE         Override encrypted file path (default: ~/.everclaw/wallet.enc)
@@ -718,19 +765,34 @@ Environment:
   EVERCLAW_SLIPPAGE_BPS      Slippage tolerance in basis points (default: 100 = 1%)
   EVERCLAW_CONFIRMATIONS     Block confirmations to wait (default: 1)
   EVERCLAW_MAX_GAS           Gas limit for transactions (default: 500000)
+  EVERCLAW_ALLOW_EXPORT      Set to "1" to allow key export in CI mode
+  EVERCLAW_YES               Set to "1" for non-interactive CI mode
+  CI                         Set to "true" for non-interactive CI mode
 
 Examples:
   node everclaw-wallet.mjs setup
   node everclaw-wallet.mjs swap eth 0.05
+  node everclaw-wallet.mjs approve 1000              # Bounded approval (CI-safe)
+  node everclaw-wallet.mjs approve --unlimited        # Unlimited approval (explicit)
   node everclaw-wallet.mjs balance
+
+CI Safety:
+  In CI mode (EVERCLAW_YES=1 or CI=true):
+  - Bounded approvals and swaps auto-confirm (simulated first)
+  - Unlimited approvals BLOCKED unless --unlimited flag is passed
+  - Key export BLOCKED unless EVERCLAW_ALLOW_EXPORT=1 is set
 `);
 }
 
 // --- Main ---
-const [,, command, ...args] = process.argv;
+const [,, command, ...rawArgs] = process.argv;
+
+// Filter known flags from positional args
+const KNOWN_FLAGS = new Set(["--unlimited", "--dry-run"]);
+const args = rawArgs.filter(a => !KNOWN_FLAGS.has(a));
 
 // === GLOBAL DRY-RUN SAFETY ===
-if (process.argv.includes("--dry-run")) {
+if (rawArgs.includes("--dry-run")) {
   console.log("🔒 DRY-RUN MODE ENABLED — no real transactions will be sent");
   global.DRY_RUN = true;
 }
