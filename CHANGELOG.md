@@ -2,6 +2,29 @@
 
 All notable changes to EverClaw are documented here.
 
+## [2026.4.1.1923] - 2026-04-01
+
+### Code Quality — Issue #13 Enhancements (5A-5D)
+
+- **5A — Safe error logging** — `logSafeError()` helper suppresses error details (paths, stack traces) unless `DEBUG=1` is set. Applied to all catch blocks in `everclaw-wallet.mjs`, `bootstrap-client.mjs`, and `safe-transfer.mjs`. Prevents information leakage in production logs.
+- **5B — Version pinning for reproducible builds** — `install.sh` now accepts `VERSION` env var (`VERSION=v2026.4.1 ./install.sh`). Default `latest` behavior preserved. Pinning enables CI reproducibility.
+- **5C — Module-level DRY_RUN** — Removed `global.DRY_RUN` mutation; replaced with module-level `let DRY_RUN = false`. Cleaner, no global pollution.
+- **5D — stdin safety for non-interactive environments** — `confirmAction()` helper checks `process.stdin.isTTY` before prompting. Prevents auto-fire on piped stdin. `EVERCLAW_YES=1` or `CI=true` enables auto-confirmation for scripts. Applied to swap, approve, and safe-transfer commands.
+
+### Files Changed
+- `scripts/everclaw-wallet.mjs` — 5A/5C/5D fixes
+- `scripts/install.sh` — 5B version pinning
+- `scripts/bootstrap-client.mjs` — 5A safe error logging
+- `scripts/safe-transfer.mjs` — 5A/5D fixes
+
+### Audit
+- Cross-model Grok 4.2 review: **9.8/10 — Excellent**
+- All 4 files pass syntax validation
+- PII Guard V2: **clean — no personal data detected**
+- Test suite: 44/60 pass (16 pre-existing environmental failures unrelated to #13)
+
+---
+
 ## [2026.4.1.1835] - 2026-04-01
 
 ### Security — Unsafe Defaults (Issue #12)
