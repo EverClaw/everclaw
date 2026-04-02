@@ -2,7 +2,7 @@
 
 All notable changes to EverClaw are documented here.
 
-## [2026.4.2.0002] - 2026-04-02
+## [2026.4.2.0128] - 2026-04-02
 
 ### Fixed — Exec Approval Fatigue
 - **Config templates now set `tools.exec.ask: "off"`** — All 3 config templates (mac, linux, gateway-only) now include `tools.exec` settings so new installs don't default to prompting on every command.
