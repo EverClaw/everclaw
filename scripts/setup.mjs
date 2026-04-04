@@ -149,7 +149,7 @@ function mergeConfig(existing, template) {
   }
 
   // Merge gateway.controlUi (safe — don't overwrite user customizations)
-  const tplControlUi = template.gateway?.controlUi;
+  const tplControlUi = template['[REDACTED]']?.controlUi || template.gateway?.controlUi;
   if (tplControlUi) {
     if (!merged.gateway) merged.gateway = {};
     if (!merged.gateway.controlUi) merged.gateway.controlUi = {};
@@ -520,7 +520,7 @@ Flags:
   --restart        Restart OpenClaw gateway after apply
   --template       Override OS auto-detection
   --with-ollama    Also setup local Ollama inference fallback
-  --ollama-model   Override auto-detected Ollama model (e.g. qwen3.5:27b)
+  --ollama-model   Override auto-detected Ollama model (e.g. gemma4:26b)
   --security-tier  Set security tier (low|recommended|maximum)
   --no-security    Skip security tier prompt
 `);

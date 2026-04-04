@@ -2,6 +2,27 @@
 
 All notable changes to EverClaw are documented here.
 
+## [2026.4.4.0403] - 2026-04-04
+
+### Changed — Local Inference: Qwen3.5 → Gemma 4
+- **Replaced Qwen3.5 model family with Google Gemma 4** across all local inference tooling. New model tiers: E2B, E4B (default), 26B MoE, 31B Dense.
+- **`setup-ollama.sh` rewritten (v2026.4.3)** — New hardware-aware model selection aligned to 4/8/12/16/24 GB RAM boundaries. Supports native Ollama pull and Unsloth GGUF for quantized variants. Requires Ollama ≥ 0.20.0 (version check added).
+- **RAM tier model selection:**
+  - < 4 GB → `gemma4-e2b-q3` (1.2 GB GGUF)
+  - 4–8 GB → `gemma4-e2b-q4` (1.6 GB GGUF)
+  - 8–12 GB → `gemma4:e4b` (9.6 GB native, default)
+  - 12–16 GB → `gemma4-26b-q3` (12.5 GB GGUF, ClawBox sweet spot, 82.6% MMLU Pro)
+  - 16–24 GB → `gemma4:26b` (17 GB native)
+  - 24+ GB → `gemma4:31b` (20 GB native)
+- **Vision + audio support** — E2B/E4B models accept text, image, and audio input. 26B/31B accept text and image.
+- **Dynamic context windows** — E2B/E4B: 128K (131072), 26B/31B: 256K (262144). Up from hardcoded 32K.
+- **maxTokens bumped to 16384** (up from 8192).
+- **GGUF pull pipeline** — New `pull_model_gguf()` downloads Unsloth GGUF files, creates Ollama Modelfile with `num_ctx`, registers via `ollama create`.
+- **Backward compatibility** — `--model qwen3.5:*` flags still accepted with deprecation warning via `map_legacy_model()`.
+- **Inference test v2** — Uses substring match (`*"OLLAMA_OK"*`) instead of sed. Temperature 0, 60s timeout, graceful fallback on timeout.
+- **`setup.mjs` controlUi fix** — Template key lookup now checks both `[REDACTED]` and `gateway` keys for backward compatibility.
+- **Config templates updated** — Both mac and linux templates now default to `gemma4:e4b` with vision+audio modalities, 128K context, 16384 maxTokens.
+
 ## [2026.4.2.2031] - 2026-04-02
 
 ### Changed

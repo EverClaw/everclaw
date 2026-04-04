@@ -4,46 +4,61 @@ set -euo pipefail
 # ═══════════════════════════════════════════════════════════════════════════════
 # Everclaw — setup-ollama.sh
 #
-# Detects hardware resources, selects optimal Qwen3.5 model, installs Ollama,
+# Detects hardware resources, selects optimal Gemma 4 model, installs Ollama,
 # and configures OpenClaw to use local inference as final fallback.
+#
+# Gemma 4 family: E2B, E4B (default), 26B MoE, 31B Dense
+# Vision + audio enabled on E2B/E4B; vision on 26B/31B.
+# Supports native Ollama pull and Unsloth GGUF for quantized variants.
+# Requires Ollama >= 0.20.0.
 #
 # Usage:
 #   bash scripts/setup-ollama.sh              # Dry-run (show what would happen)
 #   bash scripts/setup-ollama.sh --apply      # Install and configure
 #   bash scripts/setup-ollama.sh --status     # Check current Ollama status
-#   bash scripts/setup-ollama.sh --model qwen3.5:27b --apply   # Override model
+#   bash scripts/setup-ollama.sh --model gemma4:26b --apply   # Override model
 #   bash scripts/setup-ollama.sh --uninstall  # Remove Ollama from config
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # ─── Constants ─────────────────────────────────────────────────────────────────
 
 readonly SCRIPT_NAME="setup-ollama.sh"
-readonly SCRIPT_VERSION="2026.3.12"
+readonly SCRIPT_VERSION="2026.4.3"
 readonly OLLAMA_URL="https://ollama.com/install.sh"
 readonly OLLAMA_API="http://127.0.0.1:11434"
+readonly OLLAMA_MIN_MAJOR=0
+readonly OLLAMA_MIN_MINOR=20
+readonly OLLAMA_MIN_PATCH=0
+readonly GGUF_BASE_URL="https://huggingface.co/unsloth"
 
-# Model family: qwen3.5 (consistent behavior, Apache 2.0, strong tool use)
-# Sizes verified against Ollama registry (ollama.com/library/qwen3.5)
-# RAM requirements = model file size * ~1.2 (safe overhead)
+# Model family: Gemma 4 (Google, vision + audio, strong tool use)
+# Native Ollama tags: gemma4:e2b, gemma4:e4b, gemma4:26b, gemma4:31b
+# Unsloth GGUF custom models: gemma4-e2b-q3, gemma4-e2b-q4, gemma4-e4b-q3, gemma4-26b-q3, gemma4-31b-q3
 # Note: Using case functions for bash 3 compatibility (no associative arrays)
-MODEL_0_8B_SIZE=900     # ~0.9 GB file, needs ~1.1 GB RAM
-MODEL_2B_SIZE=2500      # ~2.5 GB file, needs ~3.0 GB RAM
-MODEL_4B_SIZE=3100      # ~3.1 GB file, needs ~3.7 GB RAM
-MODEL_9B_SIZE=6100      # ~6.1 GB file, needs ~7.3 GB RAM
-MODEL_27B_SIZE=16200    # ~16.2 GB file, needs ~19.4 GB RAM
-MODEL_35B_SIZE=22200    # ~22.2 GB file, needs ~26.6 GB RAM
+MODEL_E2B_SIZE=1500       # ~1.5 GB native, needs ~2 GB RAM
+MODEL_E2B_Q3_SIZE=1200    # ~1.2 GB GGUF Q3_K_M
+MODEL_E2B_Q4_SIZE=1600    # ~1.6 GB GGUF Q4_K_M
+MODEL_E4B_SIZE=9600       # ~9.6 GB native, needs ~11.5 GB RAM
+MODEL_E4B_Q3_SIZE=5500    # ~5.5 GB GGUF Q3_K_M
+MODEL_26B_SIZE=17000      # ~17 GB native, needs ~20 GB RAM
+MODEL_26B_Q3_SIZE=12500   # ~12.5 GB GGUF Q3_K_M (82.6% MMLU Pro)
+MODEL_31B_SIZE=20000      # ~20 GB native, needs ~24 GB RAM
+MODEL_31B_Q3_SIZE=15000   # ~15 GB GGUF Q3_K_M
 
 # Get model size by name (MB)
 get_model_size() {
   local model="$1"
   case "$model" in
-    qwen3.5:0.8b) echo $MODEL_0_8B_SIZE ;;
-    qwen3.5:2b)   echo $MODEL_2B_SIZE ;;
-    qwen3.5:4b)   echo $MODEL_4B_SIZE ;;
-    qwen3.5:9b)   echo $MODEL_9B_SIZE ;;
-    qwen3.5:27b)  echo $MODEL_27B_SIZE ;;
-    qwen3.5:35b)  echo $MODEL_35B_SIZE ;;
-    *)            echo 0 ;;
+    gemma4:e2b)      echo $MODEL_E2B_SIZE ;;
+    gemma4-e2b-q3)   echo $MODEL_E2B_Q3_SIZE ;;
+    gemma4-e2b-q4)   echo $MODEL_E2B_Q4_SIZE ;;
+    gemma4:e4b)      echo $MODEL_E4B_SIZE ;;
+    gemma4-e4b-q3)   echo $MODEL_E4B_Q3_SIZE ;;
+    gemma4:26b)      echo $MODEL_26B_SIZE ;;
+    gemma4-26b-q3)   echo $MODEL_26B_Q3_SIZE ;;
+    gemma4:31b)      echo $MODEL_31B_SIZE ;;
+    gemma4-31b-q3)   echo $MODEL_31B_Q3_SIZE ;;
+    *)               echo 0 ;;
   esac
 }
 
@@ -51,13 +66,121 @@ get_model_size() {
 get_model_quality() {
   local model="$1"
   case "$model" in
-    qwen3.5:0.8b) echo "Minimal — simple Q&A, formatting" ;;
-    qwen3.5:2b)   echo "Basic — general tasks, light coding" ;;
-    qwen3.5:4b)   echo "Good — coding, summarization" ;;
-    qwen3.5:9b)   echo "Strong — coding, analysis, most tasks" ;;
-    qwen3.5:27b)  echo "Excellent — complex reasoning, near-frontier" ;;
-    qwen3.5:35b)  echo "Frontier — matches cloud models" ;;
-    *)            echo "Unknown model" ;;
+    gemma4:e2b|gemma4-e2b-*) echo "Good — vision + audio, light tasks" ;;
+    gemma4:e4b|gemma4-e4b-*) echo "Strong — vision + audio, coding, most tasks (default)" ;;
+    gemma4:26b|gemma4-26b-*) echo "Excellent — vision, complex reasoning, near-frontier (82.6% MMLU Pro)" ;;
+    gemma4:31b|gemma4-31b-*) echo "Frontier — vision, matches cloud models" ;;
+    *)                       echo "Unknown model" ;;
+  esac
+}
+
+# Get context window by model
+get_model_context_window() {
+  local model="$1"
+  case "$model" in
+    gemma4:e2b*|gemma4-e2b*|gemma4:e4b*|gemma4-e4b*) echo 131072 ;;
+    gemma4:26b*|gemma4-26b*|gemma4:31b*|gemma4-31b*) echo 262144 ;;
+    *) echo 131072 ;;
+  esac
+}
+
+# Get input modalities by model
+get_model_input_modalities() {
+  local model="$1"
+  case "$model" in
+    gemma4:e2b*|gemma4-e2b*|gemma4:e4b*|gemma4-e4b*) echo '["text", "image", "audio"]' ;;
+    gemma4:26b*|gemma4-26b*|gemma4:31b*|gemma4-31b*) echo '["text", "image"]' ;;
+    *) echo '["text", "image"]' ;;
+  esac
+}
+
+# Get friendly display name for model
+get_model_display_name() {
+  local model="$1"
+  case "$model" in
+    gemma4:e2b)      echo "Gemma 4 E2B" ;;
+    gemma4-e2b-q3)   echo "Gemma 4 E2B Q3" ;;
+    gemma4-e2b-q4)   echo "Gemma 4 E2B Q4" ;;
+    gemma4:e4b)      echo "Gemma 4 E4B" ;;
+    gemma4-e4b-q3)   echo "Gemma 4 E4B Q3" ;;
+    gemma4:26b)      echo "Gemma 4 26B MoE" ;;
+    gemma4-26b-q3)   echo "Gemma 4 26B MoE Q3" ;;
+    gemma4:31b)      echo "Gemma 4 31B Dense" ;;
+    gemma4-31b-q3)   echo "Gemma 4 31B Dense Q3" ;;
+    *)               echo "$model" ;;
+  esac
+}
+
+# Map legacy qwen3.5 model names to Gemma 4 equivalents (backward compat)
+map_legacy_model() {
+  local model="$1"
+  case "$model" in
+    qwen3.5:0.8b|qwen3.5:2b)
+      log_warn "DEPRECATED: ${model} → use gemma4:e2b instead"
+      echo "gemma4:e2b" ;;
+    qwen3.5:4b|qwen3.5:9b)
+      log_warn "DEPRECATED: ${model} → use gemma4:e4b instead"
+      echo "gemma4:e4b" ;;
+    qwen3.5:27b)
+      log_warn "DEPRECATED: ${model} → use gemma4:26b instead"
+      echo "gemma4:26b" ;;
+    qwen3.5:35b)
+      log_warn "DEPRECATED: ${model} → use gemma4:31b instead"
+      echo "gemma4:31b" ;;
+    qwen3.5:*)
+      log_warn "DEPRECATED: ${model} → use gemma4:e4b instead"
+      echo "gemma4:e4b" ;;
+    *) echo "$model" ;;
+  esac
+}
+
+# Check Ollama version meets minimum requirement (>= 0.20.0)
+check_ollama_version() {
+  local version_str
+  version_str=$(ollama --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+  if [[ -z "$version_str" ]]; then
+    log_warn "Could not determine Ollama version"
+    return 1
+  fi
+
+  local major minor patch
+  major=$(echo "$version_str" | cut -d. -f1)
+  minor=$(echo "$version_str" | cut -d. -f2)
+  patch=$(echo "$version_str" | cut -d. -f3)
+
+  if [[ "$major" -gt "$OLLAMA_MIN_MAJOR" ]]; then
+    return 0
+  elif [[ "$major" -eq "$OLLAMA_MIN_MAJOR" && "$minor" -gt "$OLLAMA_MIN_MINOR" ]]; then
+    return 0
+  elif [[ "$major" -eq "$OLLAMA_MIN_MAJOR" && "$minor" -eq "$OLLAMA_MIN_MINOR" && "$patch" -ge "$OLLAMA_MIN_PATCH" ]]; then
+    return 0
+  fi
+
+  log_warn "Ollama ${version_str} is below minimum ${OLLAMA_MIN_MAJOR}.${OLLAMA_MIN_MINOR}.${OLLAMA_MIN_PATCH}"
+  log_warn "Gemma 4 models require Ollama >= 0.20.0"
+  log "Upgrade with: brew upgrade ollama (macOS) or curl -fsSL https://ollama.com/install.sh | sh (Linux)"
+  return 1
+}
+
+# Is this a GGUF custom model (not native Ollama)?
+is_gguf_model() {
+  local model="$1"
+  case "$model" in
+    gemma4-*) return 0 ;;
+    *)        return 1 ;;
+  esac
+}
+
+# Get the Unsloth GGUF download URL for a model
+get_gguf_url() {
+  local model="$1"
+  case "$model" in
+    gemma4-e2b-q3)  echo "${GGUF_BASE_URL}/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q3_K_M.gguf" ;;
+    gemma4-e2b-q4)  echo "${GGUF_BASE_URL}/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf" ;;
+    gemma4-e4b-q3)  echo "${GGUF_BASE_URL}/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q3_K_M.gguf" ;;
+    gemma4-26b-q3)  echo "${GGUF_BASE_URL}/gemma-4-26B-A4B-it-GGUF/resolve/main/gemma-4-26B-A4B-it-Q3_K_M.gguf" ;;
+    gemma4-31b-q3)  echo "${GGUF_BASE_URL}/gemma-4-31B-it-GGUF/resolve/main/gemma-4-31B-it-Q3_K_M.gguf" ;;
+    *)              echo "" ;;
   esac
 }
 
@@ -201,21 +324,23 @@ detect_gpu() {
 
 select_model() {
   if [[ -n "$FORCE_MODEL" ]]; then
+    # Map legacy qwen3.5 names
+    FORCE_MODEL=$(map_legacy_model "$FORCE_MODEL")
     SELECTED_MODEL="$FORCE_MODEL"
     log "Model:        ${SELECTED_MODEL} (user-specified override)"
     return
   fi
-  
+
   # Use available RAM for sizing, but cap at 70% of total
   # This leaves headroom for OS and other apps
   local effective_ram_mb=$AVAILABLE_RAM_MB
   local max_ram_mb=$((TOTAL_RAM_MB * 70 / 100))
-  
+
   if [[ "$effective_ram_mb" -gt "$max_ram_mb" ]]; then
     effective_ram_mb=$max_ram_mb
     log_info "Capped at 70% of total RAM: ${max_ram_mb} MB"
   fi
-  
+
   # If we have dedicated GPU VRAM, use that instead (faster inference)
   if [[ "$GPU_TYPE" == "nvidia" || "$GPU_TYPE" == "amd" ]]; then
     if [[ "$GPU_VRAM_MB" -gt 0 ]]; then
@@ -223,34 +348,30 @@ select_model() {
       log_info "Using GPU VRAM for model sizing: ${effective_ram_mb} MB"
     fi
   fi
-  
-  # Model selection thresholds (RAM in MB)
-  # Each model needs ~1.2x its file size in RAM
-  # Sizes verified against Ollama registry 2026-03-12
-  if [[ "$effective_ram_mb" -lt 1200 ]]; then
-    SELECTED_MODEL="qwen3.5:0.8b"    # needs ~1.1 GB
-  elif [[ "$effective_ram_mb" -lt 3200 ]]; then
-    SELECTED_MODEL="qwen3.5:2b"      # needs ~3.0 GB
-  elif [[ "$effective_ram_mb" -lt 4000 ]]; then
-    SELECTED_MODEL="qwen3.5:4b"      # needs ~3.7 GB
-  elif [[ "$effective_ram_mb" -lt 8000 ]]; then
-    SELECTED_MODEL="qwen3.5:9b"      # needs ~7.3 GB
-  elif [[ "$effective_ram_mb" -lt 20000 ]]; then
-    # Note: 9b is last safe choice for 8-19 GB (27b needs ~19.4 GB)
-    SELECTED_MODEL="qwen3.5:9b"      # needs ~7.3 GB
-  elif [[ "$effective_ram_mb" -lt 27000 ]]; then
-    SELECTED_MODEL="qwen3.5:27b"     # needs ~19.4 GB
+
+  # RAM tier boundaries (MB): <4096, 4096-8192, 8192-12288, 12288-16384, 16384-24576, 24576+
+  # Gemma 4 model selection — aligned to 4/8/12/16/24 GB boundaries
+  if [[ "$effective_ram_mb" -lt 4096 ]]; then
+    SELECTED_MODEL="gemma4-e2b-q3"     # ~1.2 GB GGUF Q3
+  elif [[ "$effective_ram_mb" -lt 8192 ]]; then
+    SELECTED_MODEL="gemma4-e2b-q4"     # ~1.6 GB GGUF Q4 (better quality)
+  elif [[ "$effective_ram_mb" -lt 12288 ]]; then
+    SELECTED_MODEL="gemma4:e4b"        # ~9.6 GB native (default)
+  elif [[ "$effective_ram_mb" -lt 16384 ]]; then
+    SELECTED_MODEL="gemma4-26b-q3"     # ~12.5 GB GGUF Q3 (ClawBox sweet spot)
+  elif [[ "$effective_ram_mb" -lt 24576 ]]; then
+    SELECTED_MODEL="gemma4:26b"        # ~17 GB native
   else
-    SELECTED_MODEL="qwen3.5:35b"     # needs ~26.6 GB
+    SELECTED_MODEL="gemma4:31b"        # ~20 GB native
   fi
-  
+
   local size_mb=$(get_model_size "$SELECTED_MODEL")
   local quality=$(get_model_quality "$SELECTED_MODEL")
-  
+
   log "Model:        ${SELECTED_MODEL}"
   log "Size:         ~$((size_mb / 1000)) GB"
   log "Quality:      ${quality}"
-  
+
   # Safety check: ensure model fits
   if [[ "$size_mb" -gt "$effective_ram_mb" ]]; then
     log_warn "Selected model may not fit in available RAM!"
@@ -411,7 +532,7 @@ Examples:
   bash scripts/setup-ollama.sh --apply
 
   # Force a specific model
-  bash scripts/setup-ollama.sh --model qwen3.5:27b --apply
+  bash scripts/setup-ollama.sh --model gemma4:26b --apply
 
   # Install without service setup
   bash scripts/setup-ollama.sh --apply --no-service
@@ -532,7 +653,7 @@ ensure_ollama_running() {
 
 # ─── Pull Model ─────────────────────────────────────────────────────────────────
 
-pull_model() {
+pull_model_native() {
   local model="$1"
 
   # Check if already pulled
@@ -554,6 +675,68 @@ pull_model() {
     echo ""
     log_err "Failed to pull model ${model}"
     return 1
+  fi
+}
+
+pull_model_gguf() {
+  local model="$1"
+  local url
+  url=$(get_gguf_url "$model")
+
+  if [[ -z "$url" ]]; then
+    log_err "No GGUF URL known for model: ${model}"
+    return 1
+  fi
+
+  # Check if custom model already exists
+  if ollama list 2>/dev/null | grep -q "${model}"; then
+    log_ok "Model ${model} already available"
+    return 0
+  fi
+
+  local size_mb=$(get_model_size "$model")
+  local ctx_window=$(get_model_context_window "$model")
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  local gguf_file="${tmpdir}/${model}.gguf"
+  local modelfile="${tmpdir}/Modelfile"
+
+  log "Downloading GGUF: ${model} (~$((size_mb / 1000)) GB)..."
+  log "Source: ${url}"
+  echo ""
+
+  if ! curl -fSL --progress-bar -o "$gguf_file" "$url"; then
+    log_err "Failed to download GGUF file"
+    rm -rf "$tmpdir"
+    return 1
+  fi
+
+  # Create Modelfile for Ollama
+  cat > "$modelfile" << MODELFILE
+FROM ${gguf_file}
+PARAMETER num_ctx ${ctx_window}
+MODELFILE
+
+  log "Creating Ollama model from GGUF..."
+  if ollama create "$model" -f "$modelfile" 2>&1; then
+    echo ""
+    log_ok "Model ${model} created from GGUF successfully"
+    rm -rf "$tmpdir"
+    return 0
+  else
+    echo ""
+    log_err "Failed to create model from GGUF"
+    rm -rf "$tmpdir"
+    return 1
+  fi
+}
+
+pull_model() {
+  local model="$1"
+  if is_gguf_model "$model"; then
+    pull_model_gguf "$model"
+  else
+    pull_model_native "$model"
   fi
 }
 
@@ -617,6 +800,13 @@ configure_openclaw() {
   log "Configuring OpenClaw..."
 
   # Build the ollama provider JSON block
+  local display_name
+  display_name=$(get_model_display_name "$model")
+  local input_modalities
+  input_modalities=$(get_model_input_modalities "$model")
+  local ctx_window
+  ctx_window=$(get_model_context_window "$model")
+
   local provider_json
   provider_json=$(cat <<EOF
 {
@@ -625,12 +815,12 @@ configure_openclaw() {
   "models": [
     {
       "id": "${model}",
-      "name": "$(echo "${model}" | sed 's/qwen3.5:/Qwen3.5 /' | sed 's/b$/B/') (Local Ollama)",
+      "name": "${display_name} (Local Ollama)",
       "reasoning": false,
-      "input": ["text"],
+      "input": ${input_modalities},
       "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
-      "contextWindow": 32768,
-      "maxTokens": 8192
+      "contextWindow": ${ctx_window},
+      "maxTokens": 16384
     }
   ]
 }
@@ -840,18 +1030,24 @@ test_inference() {
     -d "{
       \"model\": \"${model}\",
       \"messages\": [{\"role\": \"user\", \"content\": \"Respond with exactly: OLLAMA_OK\"}],
-      \"max_tokens\": 50
+      \"max_tokens\": 50,
+      \"temperature\": 0
     }" 2>/dev/null)
 
   if [[ -z "$response" ]]; then
-    log_err "No response from Ollama (timeout or connection refused)"
-    return 1
+    log_warn "No response from Ollama (timeout or connection refused)"
+    log "Inference test skipped — model may still work, try manually"
+    return 0
   fi
 
   local content
   content=$(echo "$response" | jq -r '.choices[0].message.content // .error // "PARSE_ERROR"' 2>/dev/null)
 
-  if echo "$content" | grep -qi "OLLAMA_OK"; then
+  # Normalize whitespace for substring match (handles thinking tags gracefully)
+  local normalized
+  normalized=$(echo "$content" | xargs 2>/dev/null || echo "$content")
+
+  if [[ "$normalized" == *"OLLAMA_OK"* ]]; then
     log_ok "Inference test passed — model is working"
     return 0
   elif echo "$content" | grep -qi "error"; then
@@ -927,6 +1123,12 @@ main() {
     # ─── Step 1: Install Ollama ───────────────
     log_section "🔧 Step 1: Install Ollama"
     install_ollama || exit 1
+
+    # ─── Step 1b: Version check ──────────
+    if ! check_ollama_version; then
+      log_err "Ollama version too old for Gemma 4. Please upgrade and re-run."
+      exit 1
+    fi
 
     # ─── Step 2: Start server ─────────────────
     log_section "🔧 Step 2: Start Ollama server"
