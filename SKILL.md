@@ -2473,7 +2473,7 @@ backup.tar.zst.age (AGE encrypted)
   "components": ["openclaw", "morpheus", "everclaw"],
   "sizes": { "openclaw": 5242880, "morpheus": 1048576, "everclaw": 4096 },
   "checksums": { "openclaw": "sha256:...", "morpheus": "sha256:..." },
-  "versions": { "openclaw": "2026.3.12", "everclaw": "2026.3.31" }
+  "versions": { "openclaw": "2026.4.5", "everclaw": "2026.4.6.1450" }
 }
 ```
 

@@ -2,6 +2,13 @@
 
 All notable changes to EverClaw are documented here.
 
+## [2026.4.6.1450] - 2026-04-06
+
+### Changed
+- **OpenClaw pinned version bumped: v2026.4.2 → v2026.4.5** — Docker images now build with OpenClaw v2026.4.5. Key upstream changes: config legacy alias cleanup with `openclaw doctor --fix` migration, embedded ACPX runtime (no external ACP CLI hop), ClawHub search/install in Control UI Skills panel, prompt caching improvements (stable fingerprints, deduplicated tool inventories), iOS + Matrix exec approval support, memory dreaming features (light/deep/REM phases, Dream Diary UI), video/music generation tools with ComfyUI/xAI/Runway/Wan providers, new bundled Qwen/Fireworks/StepFun/MiniMax providers, Amazon Bedrock Mantle auto-discovery. Security fixes: restrictive plugin tool allowlists, SSRF redirect bypass blocks, `before_tool_call` fail-closed hooks.
+- **docker-compose.yml** — Fixed stale `EVERCLAW_VERSION` build arg (was `2026.4.1.1923`, now matches Dockerfile).
+- **SKILL.md** — Fixed stale `versions` diagnostic output (OpenClaw was showing `2026.3.12`).
+
 ## [2026.4.4.0403] - 2026-04-04
 
 ### Changed — Local Inference: Qwen3.5 → Gemma 4
