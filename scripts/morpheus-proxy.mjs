@@ -357,6 +357,79 @@ function p2pFailure() {
   console.warn(`[morpheus-proxy] ❌ P2P failure #${consecutiveFailures} (threshold: ${FALLBACK_THRESHOLD})`);
 }
 
+// --- LiteLLM Error Normalization (Issues #1 & #2) ---
+// Morpheus Gateway (api.mor.org) runs LiteLLM, which wraps upstream provider
+// errors inside `providerModelError` and returns HTTP 400. This breaks every
+// client's retry/fallback logic because 400 = "bad request" = permanent error.
+// We unwrap them to the correct HTTP status codes so OpenClaw can retry/fallback.
+//
+// Issue #1: Venice 429 (rate limit / overloaded) wrapped as 400
+//           → Unwrap to HTTP 429 (triggers OpenClaw retry + fallback chain)
+// Issue #2: LiteLLM "division by zero" (server bug) wrapped as 400
+//           → Unwrap to HTTP 503 (retryable server error)
+
+function normalizeLitellmError(result) {
+  if (result.status !== 400 || result.streamed) return result;
+
+  let body;
+  try {
+    body = JSON.parse(result.body.toString());
+  } catch {
+    return result; // not JSON — leave as-is
+  }
+
+  const providerError = body?.providerModelError?.error;
+  if (!providerError) return result;
+
+  const code = String(providerError.code || "");
+  const msg = providerError.message || "";
+
+  // Issue #1: 429 rate limit wrapped as 400
+  if (
+    code === "429" ||
+    msg.includes("RateLimitError") ||
+    msg.includes("overloaded") ||
+    msg.includes("throttling_error")
+  ) {
+    const modelGroup = msg.match(/Model Group=([^\n]+)/)?.[1] || "unknown";
+    console.warn(`[morpheus-proxy] ⚡ Unwrapped LiteLLM 429 (was HTTP 400) — model group: ${modelGroup}`);
+    return {
+      ...result,
+      status: 429,
+      body: Buffer.from(JSON.stringify({
+        error: {
+          message: `Rate limited: ${msg.substring(0, 200)}`,
+          type: "rate_limit_error",
+          code: "rate_limit",
+          param: null,
+        }
+      })),
+    };
+  }
+
+  // Issue #2: 500 / division-by-zero / server errors wrapped as 400
+  if (
+    code === "500" ||
+    msg.toLowerCase().includes("division by zero")
+  ) {
+    console.warn(`[morpheus-proxy] ⚡ Unwrapped LiteLLM 500 (was HTTP 400): ${msg.substring(0, 100)}`);
+    return {
+      ...result,
+      status: 503,
+      body: Buffer.from(JSON.stringify({
+        error: {
+          message: `Upstream server error: ${msg.substring(0, 200)}`,
+          type: "server_error",
+          code: "service_unavailable",
+          param: null,
+        }
+      })),
+    };
+  }
+
+  return result; // unknown 400 — leave unchanged
+}
+
 /**
  * Forward request to Morpheus Gateway API (fallback)
  */
@@ -393,11 +466,12 @@ async function forwardToGateway(body, isStreaming, res) {
         const chunks = [];
         upstreamRes.on("data", (c) => chunks.push(c));
         upstreamRes.on("end", () => {
-          resolve({
+          const rawResult = {
             status: upstreamRes.statusCode,
             headers: upstreamRes.headers,
             body: Buffer.concat(chunks),
-          });
+          };
+          resolve(normalizeLitellmError(rawResult));
         });
         upstreamRes.on("error", reject);
       }
@@ -406,6 +480,46 @@ async function forwardToGateway(body, isStreaming, res) {
     req.write(body);
     req.end();
   });
+}
+
+// --- Gateway Retry Wrapper (Issues #1 & #2) ---
+// Retries transient errors (429 rate limit, 5xx server errors) with exponential
+// backoff before giving up. Works with both streaming and non-streaming requests.
+// For streaming: if the gateway returns SSE, it's piped through immediately (no retry).
+// For errors (even when streaming was requested): normalized and retried.
+
+async function callGatewayWithRetry(bodyStr, isStreaming, res, maxRetries = 3) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    let result;
+    try {
+      result = await forwardToGateway(bodyStr, isStreaming, res);
+    } catch (e) {
+      // Network error — retry if attempts remain
+      if (attempt < maxRetries - 1) {
+        const delay = Math.min(1000 * Math.pow(2, attempt), 10000);
+        console.warn(`[morpheus-proxy] Gateway network error (attempt ${attempt + 1}/${maxRetries}): ${e.message}, retrying in ${delay}ms`);
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+      throw e; // final attempt — let caller handle
+    }
+
+    // Streaming success — already piped to res, done
+    if (result.streamed) return result;
+
+    // result.status is already normalized by normalizeLitellmError inside forwardToGateway
+    const isTransient = [429, 500, 502, 503].includes(result.status);
+    if (!isTransient || attempt >= maxRetries - 1) {
+      return result; // success, permanent error, or final attempt
+    }
+
+    const delay = Math.min(1000 * Math.pow(2, attempt), 10000);
+    console.warn(`[morpheus-proxy] Gateway transient ${result.status} (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms`);
+    await new Promise(r => setTimeout(r, delay));
+  }
+
+  // Safety net — should not reach here
+  return forwardToGateway(bodyStr, isStreaming, res);
 }
 
 async function openSession(modelId) {
@@ -556,9 +670,9 @@ async function handleChatCompletions(req, res, body) {
     console.log(`[morpheus-proxy] Gateway-only model "${requestedModel}" — forwarding to ${GATEWAY_URL}`);
     const isStreaming = parsed.stream === true;
     try {
-      const result = await forwardToGateway(body, isStreaming, res);
+      const result = await callGatewayWithRetry(body, isStreaming, res);
       if (result.streamed) return; // streaming already piped to res
-      res.writeHead(result.status, { "Content-Type": result.headers["content-type"] || "application/json" });
+      res.writeHead(result.status, { "Content-Type": result.headers?.["content-type"] || "application/json" });
       res.end(result.body);
       return;
     } catch (e) {
@@ -582,7 +696,7 @@ async function handleChatCompletions(req, res, body) {
   if (shouldUseFallback() && GATEWAY_API_KEY) {
     console.log(`[morpheus-proxy] 🔄 Using Gateway fallback for ${requestedModel}`);
     try {
-      const result = await forwardToGateway(body, isStreaming, res);
+      const result = await callGatewayWithRetry(body, isStreaming, res);
       if (result.streamed) return; // Already handled streaming
 
       if (result.status >= 200 && result.status < 300) {
@@ -608,7 +722,7 @@ async function handleChatCompletions(req, res, body) {
       // Fallback mode - should not reach here, but handle gracefully
       if (GATEWAY_API_KEY) {
         console.log(`[morpheus-proxy] No P2P session, using Gateway fallback`);
-        const result = await forwardToGateway(body, isStreaming, res);
+        const result = await callGatewayWithRetry(body, isStreaming, res);
         if (result.streamed) return;
         if (result.status >= 200 && result.status < 300) {
           res.writeHead(result.status, { "Content-Type": result.headers["content-type"] || "application/json" });
@@ -629,7 +743,7 @@ async function handleChatCompletions(req, res, body) {
     if (GATEWAY_API_KEY) {
       console.log(`[morpheus-proxy] 🔄 Falling back to Gateway after P2P failure`);
       try {
-        const result = await forwardToGateway(body, isStreaming, res);
+        const result = await callGatewayWithRetry(body, isStreaming, res);
         if (result.streamed) return;
         if (result.status >= 200 && result.status < 300) {
           res.writeHead(result.status, { "Content-Type": result.headers["content-type"] || "application/json" });

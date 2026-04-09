@@ -909,3 +909,6 @@ describe("Bonus: Integration", () => {
     }
   });
 });
+
+// === LiteLLM Error Normalization Tests (Issue #1 & #2) ===
+
