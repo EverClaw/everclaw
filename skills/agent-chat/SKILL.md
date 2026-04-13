@@ -138,10 +138,12 @@ node skills/agent-chat/cli.mjs send 0x... "Hello, agent!"
 | `cli.mjs` | CLI commands |
 | `setup-identity.mjs` | One-time key generation |
 | `src/agent.mjs` | Agent creation + middleware wiring |
-| `src/identity.mjs` | Secret/identity loading |
+| `src/identity.mjs` | Secret/identity loading (multi-identity: agentId param) |
+| `src/paths.mjs` | Path resolution + agent ID validation (multi-identity) |
 | `src/consent.mjs` | 3-policy consent gate |
 | `src/router.mjs` | Message routing (COMMAND/DATA dispatch) |
-| `src/bridge.mjs` | Filesystem outbox watcher |
+| `src/bridge.mjs` | Filesystem outbox watcher (multi-identity: agentId param) |
+| `src/health.mjs` | Health file writer (multi-identity: agentId param) |
 | `src/health.mjs` | Health file writer |
 | `src/groups.mjs` | Group conversation mapping |
 | `src/payer.mjs` | Fee stub (network currently free) |
@@ -235,11 +237,84 @@ node skills/agent-chat/setup-identity.mjs
 
 This creates the messaging-only wallet in `~/.everclaw/xmtp/` (separate from your MOR staking wallet).
 
+## Multi-Identity (Buddy Bots)
+
+Each buddy bot agent gets its own XMTP identity, daemon process, and data directory. This is called "multi-identity" mode — one daemon per agent, running as independent services.
+
+### Directory Layout
+
+| Agent | Data Directory | Service (macOS) | Service (Linux) |
+|-------|---------------|-----------------|-----------------|
+| Host (default) | `~/.everclaw/xmtp/` | `com.everclaw.agent-chat` | `everclaw-agent-chat` |
+| Alice | `~/.everclaw/xmtp-alice/` | `com.everclaw.agent-chat.alice` | `everclaw-agent-chat-alice` |
+| Bob | `~/.everclaw/xmtp-bob/` | `com.everclaw.agent-chat.bob` | `everclaw-agent-chat-bob` |
+
+Each agent's directory contains its own `.secrets.json`, `identity.json`, `inbox/`, `outbox/`, and `peers.json` — fully isolated from other agents.
+
+### Agent ID Rules
+
+Agent IDs must be:
+- 1-63 characters
+- Lowercase alphanumeric + hyphens only
+- Must start with a letter or digit (no leading hyphens)
+- No path traversal characters (`..`, `/`, etc.)
+
+This prevents directory traversal attacks and service name conflicts.
+
+### Setup
+
+```bash
+# Generate identity for a buddy bot
+node skills/agent-chat/setup-identity.mjs --agent-id alice
+
+# Install daemon for that buddy bot
+bash scripts/setup-agent-chat.sh --agent-id alice
+
+# List all installed daemons
+bash scripts/setup-agent-chat.sh --list
+
+# Check status of a specific agent
+bash scripts/setup-agent-chat.sh --status --agent-id alice
+
+# Restart a specific agent
+bash scripts/setup-agent-chat.sh --restart --agent-id alice
+
+# Uninstall a specific agent
+bash scripts/setup-agent-chat.sh --uninstall --agent-id alice
+```
+
+### Environment Variables
+
+| Variable | Purpose |
+|----------|---------|
+| `AGENT_CHAT_AGENT_ID` | Agent ID (alternative to `--agent-id` flag) |
+| `AGENT_CHAT_XMTP_DIR` | Override XMTP data directory (default agent only) |
+| `EVERCLAW_HOME` | Base directory (default: `~/.everclaw`) |
+
+`AGENT_CHAT_XMTP_DIR` only affects the default (host) agent. Per-agent paths always resolve from `EVERCLAW_HOME` to maintain isolation.
+
+### How It Works
+
+Each per-agent service file (launchd plist or systemd unit) contains the `AGENT_CHAT_AGENT_ID` environment variable. When the daemon starts, it reads this env var and resolves all paths accordingly:
+
+1. `AGENT_CHAT_AGENT_ID=alice` → data dir is `~/.everclaw/xmtp-alice/`
+2. No env var → data dir is `~/.everclaw/xmtp/` (default host)
+
+The `--agent-id` CLI flag takes priority over the env var, allowing manual overrides.
+
+### Security
+
+- Each agent's data directory is `chmod 700`
+- Each agent's `.secrets.json` is `chmod 600`
+- Agent IDs are validated against a strict regex to prevent path traversal and service injection
+- Agents cannot access each other's wallets, messages, or peer lists
+
 ## Security
 
 - Keys stored in `~/.everclaw/xmtp/.secrets.json` (chmod 600)
 - Directory secured: `~/.everclaw/xmtp/` (chmod 700)
 - Path traversal protection on inbox writes
+- Agent ID validation: regex `/^[a-z0-9][a-z0-9-]{0,62}$/` prevents directory traversal and service injection
 - CommsGuard V6 validates all structured messages
 - Plain text messages bypass comms-guard (acceptable for agent-to-agent v1)
 

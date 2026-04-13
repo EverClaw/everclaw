@@ -13,6 +13,7 @@
 | 002 | [REDACTED] P2P Session Management | 2026-03-09 |
 | 003 | XMTP Agent-to-Agent Communication | 2026-03-14 |
 | 004 | Marketing & Sales Pipeline | 2026-03-17 |
+| 005 | OpenClaw Version Pin Bump | 2026-04-12 |
 
 ---
 
@@ -976,3 +977,23 @@ For each new agent, follow these steps:
 
 - **Mar 17, 2026** — SOP-004 created. 8 agents defined. Build order prioritized. Draft-and-approve workflow. All agents on GLM-5 ([REDACTED]).
 - **Mar 17, 2026** — All 8 agents deployed and bound to Signal groups. Total system agents: 22. content-writer tested and confirmed responsive. SOP-004 fully operational.
+
+---
+
+## SOP-005: OpenClaw Version Pin Bump
+
+> **Canonical source:** `memory/reference/SOP-005.md` — this section is synced from there.
+
+**Created:** 2026-04-12
+**Purpose:** Streamlined procedure for bumping EverClaw's embedded OpenClaw version (pure version stamps, no code changes).
+
+**Stages:** 0–10 (8 active, 2 auto-pass)
+
+**Files:** Dockerfile, docker-compose.yml, package.json, SKILL.md, CHANGELOG.md
+
+**Key insight:** Pin bumps are routine and low-risk. This SOP compresses SOP-001's 10 stages into a streamlined workflow with:
+- Auto-pass on Stages 3 (Deps) and7 (Testing pre-existing failures only)
+- Pre-formatted commands for each stage
+- Lessons learned from 4 successful pin bumps
+
+---

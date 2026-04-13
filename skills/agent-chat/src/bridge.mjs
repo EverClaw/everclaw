@@ -11,6 +11,8 @@ import { getOutboxDir } from './paths.mjs';
 import { getContextProfile } from './peers.mjs';
 import { agentInstance } from './agent.mjs';
 
+let currentAgentId = undefined;
+
 let watcher = null;
 let pollInterval = null;
 const processed = new Map(); // filename → timestamp for TTL-based eviction
@@ -96,8 +98,9 @@ async function pollOutbox() {
   } catch { /* outbox may not exist yet */ }
 }
 
-export function startBridge(config) {
-  const outboxDir = getOutboxDir();
+export function startBridge(config, agentId) {
+  currentAgentId = agentId;
+  const outboxDir = getOutboxDir(agentId);
 
   // Ensure outbox exists
   fs.mkdirSync(outboxDir, { recursive: true });

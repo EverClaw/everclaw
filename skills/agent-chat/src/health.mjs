@@ -1,5 +1,6 @@
 /**
  * src/health.mjs — status.json for OpenClaw heartbeat + message counter.
+ * Multi-identity: writes health to per-agent XMTP directory.
  */
 
 import fs from 'node:fs/promises';
@@ -16,13 +17,18 @@ export const messageCounter = {
   get value() { return this._count; },
 };
 
-export async function writeHealthFile(status) {
+/**
+ * Write health status file for a given agent.
+ * @param {string} status - 'running', 'stopped', or 'error'
+ * @param {string} [agentId] - Agent identifier for multi-identity.
+ */
+export async function writeHealthFile(status, agentId) {
   if (!getStatusFn) {
     const mod = await import('./identity.mjs');
     getStatusFn = mod.getStatus;
   }
 
-  const identityStatus = await getStatusFn();
+  const identityStatus = await getStatusFn(agentId);
   const health = {
     status,
     timestamp: new Date().toISOString(),
@@ -30,5 +36,9 @@ export async function writeHealthFile(status) {
     messagesProcessed: messageCounter.value,
   };
 
-  await fs.writeFile(getHealthFilePath(), JSON.stringify(health, null, 2));
+  if (agentId) {
+    health.agentId = agentId;
+  }
+
+  await fs.writeFile(getHealthFilePath(agentId), JSON.stringify(health, null, 2));
 }

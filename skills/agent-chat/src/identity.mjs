@@ -2,22 +2,24 @@
  * src/identity.mjs
  * Loads XMTP identity + secrets for Agent.create / createFromEnv.
  * DB path is the directory only (SDK auto-names files).
+ *
+ * Multi-identity support: reads AGENT_CHAT_AGENT_ID from env to determine
+ * which agent's identity to load. Each agent stores its data in
+ * ~/.everclaw/xmtp-<id>/ (or ~/.everclaw/xmtp/ for the default host agent).
  */
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
-
-// Allow override via env for testing
-const XMTP_DIR = process.env.AGENT_CHAT_XMTP_DIR || path.join(os.homedir(), '.everclaw', 'xmtp');
-const SECRETS_FILE = path.join(XMTP_DIR, '.secrets.json');
-const IDENTITY_FILE = path.join(XMTP_DIR, 'identity.json');
+import { getXmtpDir } from './paths.mjs';
 
 /**
  * Load secrets as real XMTP env-var names (used by daemon)
+ * @param {string} [agentId] - Agent identifier for multi-identity.
  */
-export async function loadSecrets() {
-  const data = JSON.parse(await fs.readFile(SECRETS_FILE, 'utf8'));
+export async function loadSecrets(agentId) {
+  const xmtpDir = getXmtpDir(agentId);
+  const secretsFile = path.join(xmtpDir, '.secrets.json');
+  const data = JSON.parse(await fs.readFile(secretsFile, 'utf8'));
 
   // Runtime validation — catch truncated or malformed keys early
   if (data.privateKey && data.privateKey.length !== 66) {
@@ -33,40 +35,50 @@ export async function loadSecrets() {
 
 /**
  * Full identity for runtime
+ * @param {string} [agentId] - Agent identifier for multi-identity.
  */
-export async function loadIdentity() {
-  const metadata = JSON.parse(await fs.readFile(IDENTITY_FILE, 'utf8'));
-  const secrets = await loadSecrets();
+export async function loadIdentity(agentId) {
+  const xmtpDir = getXmtpDir(agentId);
+  const identityFile = path.join(xmtpDir, 'identity.json');
+  const metadata = JSON.parse(await fs.readFile(identityFile, 'utf8'));
+  const secrets = await loadSecrets(agentId);
 
   return {
     metadata,
     secrets,
-    dbPath: XMTP_DIR
+    dbPath: xmtpDir,
+    agentId: agentId || null
   };
 }
 
 /**
  * Called by daemon after first Agent.create() to store the real inboxId
+ * @param {string} inboxId - The XMTP inbox ID received from the network.
+ * @param {string} [agentId] - Agent identifier for multi-identity.
  */
-export async function saveInboxId(inboxId) {
-  const metadata = JSON.parse(await fs.readFile(IDENTITY_FILE, 'utf8'));
+export async function saveInboxId(inboxId, agentId) {
+  const xmtpDir = getXmtpDir(agentId);
+  const identityFile = path.join(xmtpDir, 'identity.json');
+  const metadata = JSON.parse(await fs.readFile(identityFile, 'utf8'));
   metadata.inboxId = inboxId;
-  await fs.writeFile(IDENTITY_FILE, JSON.stringify(metadata, null, 2));
+  await fs.writeFile(identityFile, JSON.stringify(metadata, null, 2));
 }
 
 /**
  * Quick status for CLI/health
+ * @param {string} [agentId] - Agent identifier for multi-identity.
  */
-export async function getStatus() {
+export async function getStatus(agentId) {
   try {
-    const id = await loadIdentity();
+    const id = await loadIdentity(agentId);
     return {
       status: 'ready',
       address: id.metadata.address,
-      inboxId: id.metadata.inboxId || 'pending-first-start'
+      inboxId: id.metadata.inboxId || 'pending-first-start',
+      agentId: id.metadata.agentId || null
     };
   } catch (err) {
-    return { status: 'missing', error: err.message };
+    return { status: 'missing', error: err.message, agentId: agentId || null };
   }
 }
 
