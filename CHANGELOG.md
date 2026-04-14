@@ -2,6 +2,41 @@
 
 All notable changes to EverClaw are documented here.
 
+## [2026.4.14.1520] - 2026-04-14
+
+### Changed — OpenClaw Pin v2026.4.12 → v2026.4.14
+
+- **Dockerfile:** OpenClaw build target updated to `v2026.4.14`
+- **docker-compose.yml:** Image tag and build arg updated
+
+### Upstream Highlights (OpenClaw v2026.4.12 → v2026.4.14)
+
+#### New Features
+- **OpenAI Codex/models:** Forward-compat support for GPT-5.4-pro (pricing, limits, catalog visibility)
+- **Telegram/forum topics:** Human topic names surfaced in agent context and persisted across restarts
+
+#### Fixes
+- **Ollama/timeout:** Configured embedded-run timeout forwarded to undici stream timeout (no more premature cutoff)
+- **Ollama/streaming:** `stream_options.include_usage` sent for streaming completions (prevents bogus token counts and premature compaction)
+- **Ollama/slug generation:** Session-memory slug honors `timeoutSeconds` override (no more 15s abort)
+- **Memory/embeddings:** Non-OpenAI provider prefixes preserved during normalization (fixes "Unknown memory embedding provider")
+- **Media/transcription:** `.aac` filenames remapped to `.m4a` for MIME-sensitive endpoints
+- **Agents/context engine:** Tool-loop sessions compact from first delta, preserving ingest fallback
+- **Agents/subagents:** Registry lazy-runtime stub emitted on stable dist path (ERR_MODULE_NOT_FOUND fix)
+- **Gateway/update:** Unified service entrypoint resolution for update/reinstall/doctor
+- **Browser/SSRF:** Navigation restored under default policy; strict mode preserved for legacy configs
+- **UI/chat:** marked.js → markdown-it (ReDoS prevention)
+
+#### Security Hardening
+- Gateway tool rejects dangerous config flag changes from model-facing calls
+- Media attachments fail closed on realpath errors
+- Heartbeat forces owner downgrade for untrusted hook:wake events
+- Browser SSRF policy enforced on snapshot/screenshot/tab routes
+- MS Teams sender allowlist on SSO signin
+- Config redacts sourceConfig/runtimeConfig alias fields
+
+(Reference: https://github.com/openclaw/openclaw/releases/tag/v2026.4.14)
+
 ## [2026.4.14.0206] - 2026-04-14
 
 ### Changed — OpenClaw Pin v2026.4.11 → v2026.4.12
