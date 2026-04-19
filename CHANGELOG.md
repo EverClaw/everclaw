@@ -2,6 +2,30 @@
 
 All notable changes to EverClaw are documented here.
 
+## [UNRELEASED] — Buddy Bots Gap 8: Inference Quotas
+
+### Added — Per-Agent Inference Quota Management
+
+- **`buddy-quotas.mjs`** (960 lines) — CLI + library for per-agent inference quota tracking
+  - Per-agent token counters in `~/.everclaw/quotas/usage/{agent-id}.json`
+  - Configurable daily/monthly limits with per-agent overrides
+  - Alert threshold (default 80%) with host notification
+  - Graceful degradation to lighter model at 90% (configurable)
+  - Three cutoff actions: `degrade`, `block`, `warn`
+  - Automatic daily/monthly rollover with 30-day history retention
+  - Provider + model breakdown tracking (morpheus/venice/ollama)
+  - Export/import for data portability
+  - `initializeAgent()` / `removeAgentData()` for provision/deprovision integration
+  - Lock-free file-per-agent design (zero contention between concurrent bots)
+  - Zero npm dependencies (Node built-ins only)
+- **50 tests** — library + CLI coverage including rollover, validation, thresholds, export roundtrip
+
+### Grok 4.20 Audit
+- 3 rounds → **Perfect** (both files)
+- R1: Fixed redundant ternary, defensive config guard, robust filename parsing
+- R2: Fixed test SCRIPT path resolution, removed dead config mutation code
+- R3: Perfect — zero remaining issues
+
 ## [2026.4.18.0201] - 2026-04-18
 
 ### Added — MOR Staking Session Management
