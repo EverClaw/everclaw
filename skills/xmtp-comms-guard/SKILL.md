@@ -1,3 +1,8 @@
+---
+name: xmtp-comms-guard
+description: "Critical security middleware for all XMTP communications in EverClaw. Wraps raw XMTP clients with guarded middleware enforcing schema validation, hash chain integrity, nonce-based replay protection, peer registry checks, and fail-closed security policies. Integrates Three-Shift approval flow for sensitive operations. Use when integrating XMTP messaging, configuring communication security, reviewing the threat model, or auditing enforcement of guarded client usage."
+---
+
 # xmtp-comms-guard — Skill Integration Guide (V6)
 
 **Type:** Critical Security
